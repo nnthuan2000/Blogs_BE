@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { DataTypes } = require('sequelize');
+const { DataTypes, Op } = require('sequelize');
 
 module.exports = (sequelize) => {
     const User = sequelize.define('User', {
@@ -91,14 +91,23 @@ module.exports = (sequelize) => {
         user.dataValues.passwordConfirm = undefined;
     });
 
-    User.afterSave(async (user, _) => {
+    User.afterSave((user, _) => {
         user.dataValues.active = undefined;
         user.dataValues.password = undefined;
     });
 
-    User.prototype.isCorrectPassword = (a) => {
-        console.log('aaaa', a);
-    };
+    User.beforeFind((options) => {
+        options.where = {
+            ...options.where,
+            active: { [Op.is]: true },
+        };
+        if (options.attributes) {
+            options.attributes.exclude = ['active'];
+        } else options.attributes = { exclude: ['active'] };
+    });
+
+    User.prototype.isCorrectPassword = async (passwordFromClient, passwordFromDB) =>
+        await bcrypt.compare(passwordFromClient, passwordFromDB);
 
     return User;
 };

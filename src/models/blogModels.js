@@ -31,16 +31,6 @@ module.exports = (sequelize) => {
                 },
             },
         },
-        email: {
-            type: DataTypes.STRING,
-            allowNull: false,
-            trim: true,
-            validate: {
-                isEmail: {
-                    msg: 'Incorrect email format',
-                },
-            },
-        },
         summary: {
             type: DataTypes.TEXT,
             allowNull: false,

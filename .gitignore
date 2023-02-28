@@ -4,4 +4,5 @@ node_modules
 
 loadDataToDB.js
 src/utils/blogs.json
+src/utils/users.json
 src/utils/createData.js
