@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { DataTypes, Op } = require('sequelize');
 
@@ -55,6 +56,12 @@ module.exports = (sequelize) => {
                 },
             },
         },
+        passwordResetToken: {
+            type: DataTypes.VIRTUAL,
+        },
+        passwordResetTokenExpires: {
+            type: DataTypes.VIRTUAL,
+        },
         job: {
             type: DataTypes.STRING,
             allowNull: false,
@@ -108,6 +115,22 @@ module.exports = (sequelize) => {
 
     User.prototype.isCorrectPassword = async (passwordFromClient, passwordFromDB) =>
         await bcrypt.compare(passwordFromClient, passwordFromDB);
+
+    User.prototype.createPasswordResetToken = async function () {
+        const resetToken = crypto.randomBytes(32).toString('hex');
+
+        // This token is what we're gonna send to the user and so it's like a reset password really that the user can then use to create a new real password. And of course, only the user will have access to this token
+        //* => It really behaves kind of like a password, it means that if a hacker can get access to our DB -> that's gonna allow the hacker to gain access of the account by setting a new password
+        //! If we would just simply store this reset token in our DB now, then if some attacker gains access to the DB, they could can use that token and create a new password using that token and create a new password using that token instead of you doing it
+        //!! ==> Just like a password, we should never store a plain reset token in the database
+        this.dataValues.passwordResetToken = crypto
+            .createHash('sha256')
+            .update(resetToken)
+            .digest('hex');
+
+        this.dataValues.passwordResetTokenExpires = Date.now() + 10 * 60 * 1000;
+        return resetToken;
+    };
 
     return User;
 };
