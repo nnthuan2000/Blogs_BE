@@ -114,7 +114,7 @@ module.exports = (sequelize) => {
     });
 
     Blog.afterSave((blog, _) => {
-        blog.dataValues.active = undefined;
+        blog.active = undefined;
     });
 
     return Blog;

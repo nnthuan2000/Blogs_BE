@@ -1,4 +1,6 @@
+const crypto = require('crypto');
 const validator = require('validator');
+const { Op } = require('sequelize');
 
 const { User, sequelize } = require('../models');
 const catchAsyncError = require('../utils/catchAsyncError');
@@ -22,6 +24,7 @@ const createSendToken = async (data, statusCode, res) => {
     });
 };
 
+// ! Not in system
 exports.signup = catchAsyncError(async (req, res, next) => {
     const result = await sequelize.transaction((t) => User.create(req.body, { transaction: t }));
     createSendToken(result, 201, res);
@@ -68,8 +71,8 @@ exports.forgotPassword = catchAsyncError(async (req, res, next) => {
         if (!user) throw new AppError(`There is no user with that email address`, 404);
 
         //? 3. Generate random token and save it to DB for later checking
-        const resetToken = await user.createPasswordResetToken();
-        await user.save({ validateBeforeSave: false });
+        const resetToken = user.createPasswordResetToken();
+        await user.save({ validate: false, transaction: t });
 
         //? 4. Send it to user's email
         const resetURL = `${req.protocol}://${req.get(
@@ -84,9 +87,9 @@ exports.forgotPassword = catchAsyncError(async (req, res, next) => {
                 message,
             });
         } catch (error) {
-            user.dataValues.passwordResetToken = undefined;
-            user.dataValues.passwordResetTokenExpires = undefined;
-            await user.save({ validateBeforeSave: false });
+            user.passwordResetToken = null;
+            user.passwordResetTokenExpires = null;
+            await user.save({ validate: false, transaction: t });
             throw new AppError('There was an error sending the email. Try again later', 500);
         }
     });
@@ -97,4 +100,56 @@ exports.forgotPassword = catchAsyncError(async (req, res, next) => {
     });
 });
 
-exports.resetPassword = catchAsyncError(async (req, res, next) => {});
+exports.resetPassword = catchAsyncError(async (req, res, next) => {
+    //? 1. Get user based on the token
+    const { token } = req.params;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const result = await sequelize.transaction(async (t) => {
+        let user = await User.findOne({
+            where: {
+                passwordResetToken: hashedToken,
+                passwordResetTokenExpires: { [Op.gte]: Date.now() },
+            },
+            transaction: t,
+        });
+        if (!user) throw new AppError('Token is not valid or has expired', 404);
+
+        //? 2. If token has not expired, and there is user, set the new password
+        user.password = req.body.password;
+        user.passwordResetToken = null;
+        user.passwordResetTokenExpires = null;
+        user = await user.save({ validate: true, transaction: t });
+        return user;
+    });
+
+    //? 3. Log the user in, sent JWT
+    // createSendToken(result, 200, res);
+    res.status(200).json({
+        status: 'success',
+        data: { result },
+    });
+});
+
+// ! Already in system
+exports.protect = catchAsyncError(async (req, res, next) => {
+    let token;
+    //? 1. Get token and check of it's there
+    if (req.headers.authorization && req.headers.startsWith('Bearer')) {
+        token = req.headers.authorization.split(' ')[1];
+    }
+    if (!token)
+        return next(
+            new AppError('You are not logged in! Please log in to get access resources', 401)
+        );
+
+    //? 2. Verification token
+    const decoded = tokenHandler.verifyToken();
+
+    //? 3. Check if user still exist
+    //? 4. Check if user changed password after the token was issued
+});
+
+exports.restrictTo =
+    (...roles) =>
+    (req, res, next) => {};

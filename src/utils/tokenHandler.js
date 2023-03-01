@@ -3,16 +3,9 @@ const jwt = require('jsonwebtoken');
 
 const authConfig = require('../configs/authConfig');
 
-exports.generateToken = async (infos, type) => {
-    const infoOfToken = authConfig[type];
-    const token = await promisify(jwt.sign)(infos, infoOfToken.secret, {
-        expiresIn: infoOfToken.expiresIn,
+exports.generateToken = (infos, type) =>
+    promisify(jwt.sign)(infos, authConfig[type].secret, {
+        expiresIn: authConfig[type].expiresIn,
     });
-    return token;
-};
 
-exports.verifyToken = async (token, type) => {
-    const infoOfToken = authConfig[type];
-    const decoded = await promisify(jwt.verify)(token, infoOfToken.secret);
-    return decoded;
-};
+exports.verifyToken = (token, type) => promisify(jwt.verify)(token, authConfig[type].secret);

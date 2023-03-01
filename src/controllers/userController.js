@@ -15,3 +15,13 @@ exports.getAllUsers = catchAsyncError(async (req, res, next) => {
         data: { result },
     });
 });
+
+exports.createUser = catchAsyncError(async (req, res, next) => {});
+
+exports.deleteAllUsers = catchAsyncError(async (req, res, next) => {});
+
+exports.getUser = catchAsyncError(async (req, res, next) => {});
+
+exports.updateUser = catchAsyncError(async (req, res, next) => {});
+
+exports.deleteUser = catchAsyncError(async (req, res, next) => {});
