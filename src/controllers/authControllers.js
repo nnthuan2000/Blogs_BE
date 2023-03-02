@@ -9,16 +9,20 @@ const tokenHandler = require('../utils/tokenHandler');
 const sendEmail = require('../utils/sendEmail');
 
 const createSendToken = async (data, statusCode, res) => {
-    const { id, username } = data;
-    const accessToken = await tokenHandler.generateToken({ id, username }, 'access');
-    const refreshToken = await tokenHandler.generateToken({ id, username }, 'refresh');
+    const { id, name } = data;
+    const accessToken = await tokenHandler.generateToken({ id, name }, 'accessToken');
+    const refreshToken = await tokenHandler.generateToken({ id, name }, 'refreshToken');
+    data.refreshToken = refreshToken;
+    await data.save();
+    // await data.update({ refreshToken: refreshToken });
 
     // Remove password from output
-    data.dataValues.password = undefined;
+    data.password = undefined;
+    data.refreshToken = undefined;
 
     res.status(statusCode).json({
         status: 'success',
-        data: { data },
+        data: data,
         accessToken,
         refreshToken,
     });
@@ -46,9 +50,9 @@ exports.login = catchAsyncError(async (req, res, next) => {
 
     const result = await sequelize.transaction(async (t) => {
         //? 2. Check if user exist && password is correct
-        const user = await User.findOne({ where: { email: email }, transaction: t });
-        if (!user) throw new AppError('Incorrect email', 401);
-        const isCorrect = await user.isCorrectPassword(password, user.dataValues.password);
+        const user = await User.findByEmail(email, t, ['password']);
+        if (!user) throw new AppError('Incorrect email or email is not exist', 401);
+        const isCorrect = await user.isCorrectPassword(password, user.password);
         if (!isCorrect) throw new AppError('Incorrect password', 401);
         return user;
     });
@@ -56,8 +60,6 @@ exports.login = catchAsyncError(async (req, res, next) => {
     //? 2. If everything oke, sent token to client
     createSendToken(result, 200, res);
 });
-
-exports.protect = catchAsyncError(async (req, res, next) => {});
 
 exports.forgotPassword = catchAsyncError(async (req, res, next) => {
     //? 1. Check if email is correct format
@@ -67,7 +69,7 @@ exports.forgotPassword = catchAsyncError(async (req, res, next) => {
 
     await sequelize.transaction(async (t) => {
         //? 2. Get user based on POSTed email
-        const user = await User.findOne({ where: { email: email }, transaction: t });
+        const user = await User.findByEmail(email, t);
         if (!user) throw new AppError(`There is no user with that email address`, 404);
 
         //? 3. Generate random token and save it to DB for later checking
@@ -105,7 +107,7 @@ exports.resetPassword = catchAsyncError(async (req, res, next) => {
     const { token } = req.params;
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-    const result = await sequelize.transaction(async (t) => {
+    await sequelize.transaction(async (t) => {
         let user = await User.findOne({
             where: {
                 passwordResetToken: hashedToken,
@@ -123,33 +125,93 @@ exports.resetPassword = catchAsyncError(async (req, res, next) => {
         return user;
     });
 
-    //? 3. Log the user in, sent JWT
-    // createSendToken(result, 200, res);
-    res.status(200).json({
+    res.status(201).json({
         status: 'success',
-        data: { result },
+        message: 'Your password is reset successfully. Please log in again!',
     });
 });
 
-// ! Already in system
 exports.protect = catchAsyncError(async (req, res, next) => {
-    let token;
     //? 1. Get token and check of it's there
-    if (req.headers.authorization && req.headers.startsWith('Bearer')) {
-        token = req.headers.authorization.split(' ')[1];
+    const { authorization } = req.headers;
+    if (!authorization || !authorization.startsWith('Bearer ')) {
+        return next(new AppError('Missing or invalid access token', 401));
     }
-    if (!token)
-        return next(
-            new AppError('You are not logged in! Please log in to get access resources', 401)
-        );
+    const accessToken = authorization.substring('Bearer '.length);
+    if (!accessToken)
+        return next(new AppError('You are not logged in! Please log in to get access', 401));
 
     //? 2. Verification token
-    const decoded = tokenHandler.verifyToken();
+    let decoded;
+    try {
+        decoded = await tokenHandler.verifyToken(accessToken, 'accessToken');
+        if (decoded.sub !== 'accessToken') {
+            return next(new AppError('Invalid token type', 401));
+        }
+    } catch (err) {
+        if (err.message === 'jwt expired') {
+            return next(
+                new AppError(
+                    'Token is expired, please use refreshToken to generate new accessToken',
+                    401
+                )
+            );
+        }
+        return next(new AppError('Invalid access token', 401));
+    }
 
     //? 3. Check if user still exist
-    //? 4. Check if user changed password after the token was issued
+    const currentUser = await User.findByPk(decoded.id);
+    if (!currentUser)
+        return next(new AppError('The user belonging to this token does no longer exist', 401));
+
+    req.user = currentUser;
+    next();
+});
+
+exports.refreshToken = catchAsyncError(async (req, res, next) => {
+    //? 1. Check refreshToken
+    const contentOfRefreshToken = req.body.refreshToken;
+    if (!contentOfRefreshToken || !contentOfRefreshToken.startsWith('Refresh ')) {
+        return next(new AppError('Missing or invalid token', 400));
+    }
+    const refreshToken = contentOfRefreshToken.substring('Refresh '.length);
+    if (!refreshToken)
+        return next(new AppError('You are not logged in! Please log in to get access', 401));
+
+    //? 2. Verify refreshToken
+    let decode;
+    try {
+        decode = await tokenHandler.verifyToken(refreshToken, 'refreshToken');
+        if (decode.sub !== 'refreshToken') {
+            return next(new AppError('Invalid token type', 400));
+        }
+    } catch (err) {
+        if (err.message === 'jwt expired') {
+            return next(
+                new AppError(
+                    'Refresh token is expired, Please log in again to generate new tokens',
+                    400
+                )
+            );
+        }
+        return next(new AppError('Invalid refresh token', 400));
+    }
+
+    //? 3. Check if user still exist
+    const user = await User.findByPk(decode.id);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    createSendToken(user, 201, res);
 });
 
 exports.restrictTo =
     (...roles) =>
-    (req, res, next) => {};
+    (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return next(new AppError('You do not have permission to perform this action', 403));
+        }
+        next();
+    };

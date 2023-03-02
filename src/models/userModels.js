@@ -45,11 +45,17 @@ module.exports = (sequelize) => {
                 is: /(?=^.{8,}$)(?=.*\d)(?=.*[!@#$%^&*]+)(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$/,
             },
         },
+        passwordChangedAt: {
+            type: DataTypes.DATE,
+        },
         passwordResetToken: {
             type: DataTypes.STRING,
         },
         passwordResetTokenExpires: {
             type: DataTypes.DATE,
+        },
+        refreshToken: {
+            type: DataTypes.STRING,
         },
         job: {
             type: DataTypes.STRING,
@@ -84,7 +90,14 @@ module.exports = (sequelize) => {
 
     //* Hooks
     User.beforeSave(async (user, _) => {
-        user.password = await bcrypt.hash(user.password, 12);
+        if (user.changed('password')) {
+            user.password = await bcrypt.hash(user.password, 12);
+        }
+    });
+
+    User.beforeSave((user, _) => {
+        if (!user.changed('password') || user.isNewRecord) return;
+        user.passwordChangedAt = Date.now();
     });
 
     User.afterSave((user, _) => {
@@ -95,20 +108,24 @@ module.exports = (sequelize) => {
     });
 
     User.beforeFind((options) => {
+        const attributes = [
+            'active',
+            'passwordResetToken',
+            'passwordResetTokenExpires',
+            'passwordChangedAt',
+            'refreshToken',
+        ];
         options.where = {
             ...options.where,
             active: { [Op.is]: true },
         };
+        options.exclude = options.exclude || [];
         if (options.attributes) {
-            options.attributes.exclude = [
-                'active',
-                'passwordResetToken',
-                'passwordResetTokenExpires',
-            ];
-        } else
-            options.attributes = {
-                exclude: ['active', 'passwordResetToken', 'passwordResetTokenExpires'],
-            };
+            options.attributes.exclude = [...options.exclude, ...attributes];
+        } else {
+            options.attributes = { exclude: [...options.exclude, ...attributes] };
+        }
+        delete options.exclude;
     });
 
     //* Instance methods
@@ -129,7 +146,12 @@ module.exports = (sequelize) => {
 
     //* Static methods
     // Find a user by their email address
-    User.findByEmail = (email) => this.findOne({ where: { email } });
+    User.findByEmail = (email, transaction, ...excludeFields) =>
+        User.findOne({
+            where: { email },
+            exclude: [...excludeFields],
+            transaction: transaction,
+        });
 
     return User;
 };

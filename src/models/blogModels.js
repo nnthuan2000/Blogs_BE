@@ -109,8 +109,11 @@ module.exports = (sequelize) => {
             active: { [Op.is]: true },
         };
         if (options.attributes) {
-            options.attributes.exclude = ['active'];
-        } else options.attributes = { exclude: ['active'] };
+            options.attributes.exclude = [...options.exclude];
+        } else {
+            options.attributes = { exclude: [...options.exclude] };
+        }
+        delete options.exclude;
     });
 
     Blog.afterSave((blog, _) => {

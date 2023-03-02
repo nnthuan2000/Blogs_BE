@@ -3,6 +3,8 @@ const express = require('express');
 const authController = require('../controllers/authControllers');
 const userController = require('../controllers/userController');
 
+const middlewares = require('../middlewares/getPagination');
+
 const authRoutes = require('./authRoutes');
 
 const router = express.Router();
@@ -11,11 +13,14 @@ router.use(authRoutes);
 
 //* Protect all routes after this middleware
 
+router.use(authController.protect);
+
+router.use(authController.restrictTo('admin'));
+
 router
     .route('/')
-    .get(userController.getAllUsers)
-    .post(userController.createUser)
-    .delete(userController.deleteAllUsers);
+    .get(middlewares.getPagination, userController.getAllUsers)
+    .post(userController.createUser);
 
 router
     .route('/:id')
